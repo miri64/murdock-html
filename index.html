@@ -17,25 +17,10 @@
       </div>
       <div id="pull_requests">
       </div>
-<!--
-      <div id="pagination"  class="text-center">
-        <ul class="pagination">
-          <li class="disabled">
-            <a href="#" class="prev" aria-label="Previous">
-              <span aria-hidden="true">&laquo;</span>
-            </a>
-          </li>
-          <li class="active"><a href="#">1 <span class="sr-only">(current)</span></a></li>
-          <li class="disabled">
-            <a href="#" class="next" aria-label="Next">
-              <span aria-hidden="true">&raquo;</span>
-            </a>
-          </li>
-        </ul>
-      </div>
--->
     </div>
     <script>
+    var page = 1;
+
     function id_attr(id) {
       if (id) {
         return ' id="' + id + '"';
@@ -231,11 +216,56 @@
                    "pr-" + prnum, ["panel-" + cl]));
     }
 
+    function add_pagination(obj, links) {
+      if (["prev", "next"].some(key => key in links)) {
+        obj.append('<nav aria-label="pager">' +
+            '<ul id="murdock-pager" class="pager">' +
+            '<li class="previous"><a href="#">' +
+            '<span aria-hidden="true">&larr;</span> Older</a></li>' +
+            '<li class="next"><a href="#">' +
+            'Newer <span aria-hidden="true">&lrarr;</span></a></li>' +
+            '</ul></nav>');
+        var prev = $("#murdock-pager > .previous")
+        var next = $("#murdock-pager > .next")
+        if ("prev" in links) {
+          prev.attr("value", page - 1);
+          prev.click(get_page);
+        }
+        else {
+          prev.addClass("disabled");
+        }
+        if ("prev" in links) {
+          prev.attr("value", page + 1);
+          next.click(get_page);
+        }
+        else {
+          prev.addClass("disabled");
+        }
+      }
+    }
+
     function get_prs() {
       $.ajax({
           url: "https://" + murdockConfig.baseURL + "/api/pull_requests",
+          data: { page: page },
           context: $('#pull_requests')
-      }).done(function(prs) {
+      }).done(function(prs, text_status, request) {
+          var link_header = request.getResponseHeader("Link");
+          var page_links = {}
+          if (link_header) {
+            var link_parts = link_header.split(",");
+
+            link_parts.forEach(function(link) {
+              var components = link.split(";");
+              if (components.length < 2) {
+                return;
+              }
+              var rel = components[1].replace(/^\s*rel="(.*)"\s*$/, '$1');
+              var ctx = components[0].replace(/^\s*<(.*)>\s*$/, '$1');
+              page_links[rel] = ctx;
+            });
+          }
+
           $(this).empty()
           if (prs.queued) {
               prs.queued.sort(function(a,b){ return b.since - a.since });
@@ -255,25 +285,28 @@
                   add_item($(this), 2, prs.finished[i]);
               }
           }
+          add_pagination($(this), page_links);
           update_durations();
       });
     }
 
     function update_status(event) {
-      var msg = JSON.parse(event.data);
-      if (msg.cmd == "reload_prs") {
-        get_prs();
-      }
-      else if (msg.cmd == "prstatus") {
-        var prnum = msg.prnum;
-        var html;
-        if (msg.html) {
-          html = msg.html;
+      if (page == 1) {
+        var msg = JSON.parse(event.data);
+        if (msg.cmd == "reload_prs") {
+          get_prs();
         }
-        else if (msg.status) {
-          html = pr_status(msg.status);
+        else if (msg.cmd == "prstatus") {
+          var prnum = msg.prnum;
+          var html;
+          if (msg.html) {
+            html = msg.html;
+          }
+          else if (msg.status) {
+            html = pr_status(msg.status);
+          }
+          $('#pr-' + prnum + '-status').html(html);
         }
-        $('#pr-' + prnum + '-status').html(html);
       }
     }
 
