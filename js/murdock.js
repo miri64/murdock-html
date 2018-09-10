@@ -78,6 +78,207 @@ function progress_bar(percent) {
          '</div>';
 }
 
+var jobs = [];
+var jobs_hashmap = {}
+
+class Job {
+  constructor(buildstate, o) {
+    if (o.title) {
+      var pattern = new RegExp("[0-9]+$");
+
+      if (this.prnum in jobs_hashmap) {
+        return;
+      }
+      this._title = o.title;
+      this.prnum = pattern.exec(o.url)
+      jobs_hashmap[this.prnum] = this;
+      this.user = o.user;
+      this.url = o.url;
+      this.is_pr = true;
+    }
+    else {
+      this.is_pr = false;
+    }
+    this.commit = o.commit
+    this.since = o.since * 1000;
+    this.update_buildstate(buildstate, o);
+  }
+
+  static update_status_prstatus(msg) {
+    if (msg.prnum in jobs_hashmap) {
+      var obj = jobs_hashmap[msg.prnum];
+      if (msg.html) {
+        obj.status_html = msg.html;
+        obj.status = null;
+      }
+      else {
+        obj.status_html = null;
+        obj.status;
+      }
+      obj.update_job_html();
+    }
+  }
+
+  static update_status_reload_prs(query, buildstate, list_item) {
+    var obj;
+    if (list_item.prnum in jobs_hashmap) {
+      obj = jobs_hashmap(list_item.prnum);
+    }
+    else {
+      obj = new Job(buildstate, list_item);
+    }
+    obj.update_buildstate(buildstate, list_item);
+    obj.update_job_html(query);
+  }
+
+  get title() {
+    if (this._title) {
+      if (this.output_url) {
+        return "<a href=\"" + this.output_url + "\">" + this._title + "</a>";
+      }
+      else {
+        return this._title;
+      }
+    }
+    else {
+      return new Date(this.since).toLocaleString(
+          navigator.language,
+          {weekday: "short", year: "numeric", month: "short", day: "numeric"}
+        ) + " (" + this.commit.substring(0, 7) + ")";
+
+    }
+  }
+
+  get icon() {
+    switch (this.buildstate) {
+      case Job.BUILDSTATE_QUEUED:
+        return "inbox";
+      case Job.BUILDSTATE_BUILDING:
+        return "wrench";
+      case Job.BUILDSTATE_FINISHED:
+        if (this.result == "success") {
+          return "ok";
+        }
+        else if (this.result == "errored") {
+          return "remove";
+        }
+        /* falls through intentionally */
+      default:
+        return "question-sign";
+    }
+  }
+
+  get color_class() {
+    switch (this.buildstate) {
+      case Job.BUILDSTATE_QUEUED:
+        return "info";
+      case Job.BUILDSTATE_BUILDING:
+        return "warning";
+      case Job.BUILDSTATE_FINISHED:
+        if (this.result == "success") {
+          return "success";
+        }
+        else if (this.result == "errored") {
+          return "danger";
+        }
+        /* falls through intentionally */
+      default:
+        return "default";
+    }
+  }
+
+  get panel_id() {
+    if (this.prnum) {
+      return "pr-" + this.prnum;
+    }
+    else {
+      return "n-" + this.since + "-" + this.commit;
+    }
+  }
+
+  update_buildstate(buildstate, o) {
+    this.buildstate = buildstate;
+    switch (buildstate) {
+      case Job.BUILDSTATE_FINISHED:
+        this.result = o.result;
+        this.runtime = o.runtime;
+        this.output_url = o.output_url;
+        /* falls through intentionally */
+      case Job.BUILDSTATE_BUILDING:
+        if (o.status_html) {
+          this.status_html = o.status_html;
+          this.status = null;
+        }
+        else {
+          this.status_html = null;
+          this.status = o.status;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  update_job_html(query) {
+    if ($("#" + this.panel_id).length > 0) {
+      
+    }
+    else if (query) {
+      var item_content = "";
+      if (this.url) {
+        item_content += bs_col(glyphicon("user") + " " + this.user, 2) +
+                        bs_col(glyphicon("link") +
+                          ' <a href="' + this.url + '" target="_blank">' +
+                          'PR #' + this.prnum + '</a>', 2);
+      }
+      item_content += bs_col(glyphicon("tag") +
+                        ' <a href="https://github.com/RIOT-OS/RIOT/commit/' +
+                        this.commit + '" target="_blank">' +
+                        "<code>" + this.commit.substring(0,7) +
+                        "</code></a>", 2) +
+                      bs_col(glyphicon("calendar") + " " +
+                        new Date(this.since).toLocaleString() + ' <div ' +
+                        'class="since" style="display: inline"' +
+                        'since="' + this.since + '"></div>', 4);
+      if (this.runtime) {
+        item_content += bs_col(glyphicon("hourglass") + " " +
+                        moment.duration(this.runtime * - 1).humanize(), 2);
+      }
+      var status_id = this.panel_id + "-status";
+      var status_html = "";
+      if (this.status_html && (this.status_html)) {
+        status_html = bs_row(this.status_html, status_id);
+      }
+      else if (this.status) {
+        status_html = bs_row(pr_status(this.status), status_id);
+      }
+      query.append(bs_panel(glyphicon(this.icon) + " " + this.title,
+                     bs_row(item_content) + status_html,
+                     this.panel_id, ["panel-" + this.color_class]));
+    }
+  }
+}
+
+// Define class constants
+Object.defineProperty(Job, 'BUILDSTATE_QUEUED', {
+  value: 0,
+  enumerable: false,
+  configurable: false,
+  writable: false,
+});
+Object.defineProperty(Job, 'BUILDSTATE_BUILDING', {
+  value: 1,
+  enumerable: false,
+  configurable: false,
+  writable: false,
+});
+Object.defineProperty(Job, 'BUILDSTATE_FINISHED', {
+  value: 2,
+  enumerable: false,
+  configurable: false,
+  writable: false,
+});
+
 function pr_status(status) {
   /* the status parameter is expected to be an object with the following
    * attributes:
@@ -237,24 +438,21 @@ function get_prs() {
       url: "https://" + murdockConfig.baseURL + "/api/pull_requests",
       context: $('#pull_requests'),
   }).done(function(prs) {
-      $(this).empty()
+      function _update(query, buildstate, list) {
+        list.sort(function(a,b){ return b.since - a.since });
+        for (i = 0; i < list.length; i++) {
+          Job.update_status_reload_prs(query, buildstate, list[i]);
+        }
+      }
+      var query = $(this);
       if (prs.queued) {
-          prs.queued.sort(function(a,b){ return b.since - a.since });
-          for (i = 0; i < prs.queued.length; i++) {
-              add_item($(this), 0, prs.queued[i]);
-          }
+        _update(query, Job.BUILDSTATE_QUEUED, prs.queued);
       }
       if (prs.building) {
-          prs.building.sort(function(a,b){ return b.since - a.since });
-          for (i = 0; i < prs.building.length; i++) {
-              add_item($(this), 1, prs.building[i]);
-          }
+        _update(query, Job.BUILDSTATE_BUILDING, prs.building);
       }
       if (prs.finished) {
-          prs.finished.sort(function(a,b){ return b.since - a.since });
-          for (i = 0; i < prs.finished.length; i++) {
-              add_item($(this), 2, prs.finished[i]);
-          }
+        _update(query, Job.BUILDSTATE_FINISHED, prs.finished);
       }
       update_durations();
   });
